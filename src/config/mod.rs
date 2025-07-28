@@ -14,6 +14,8 @@ pub struct Config {
     pub frontend_origin: String,
     pub rate_limit_requests: u32,     
     pub rate_limit_period_seconds: u64, 
+    pub csrf_secret: String,
+    pub env: String,
 }
 
 // 2. A function to load the configuration from the environment.
