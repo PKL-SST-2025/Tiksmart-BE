@@ -1,11 +1,6 @@
 use crate::errors::AppError;
 use crate::utils::csrf;
-use axum::{
-    extract::{Form, Json},
-    response::IntoResponse,
-    routing::{get, post},
-    Router,
-};
+use axum::{http::StatusCode, response::IntoResponse, Json};
 use axum_extra::extract::cookie::CookieJar;
 use serde::{Deserialize, Serialize};
 
@@ -14,28 +9,33 @@ pub struct CsrfTokenResponse {
     pub csrf_token: String,
 }
 
+// THE FIX: Renamed this to be more generic for a JSON payload.
 #[derive(Deserialize)]
-struct SubmitRequest {
-    message: String,
-    csrf_token: String,
+pub struct CsrfPayload {
+    pub csrf_token: String,
 }
 
-#[derive(Deserialize)]
-pub struct Keys {
-    pub authenticity_token: String,
-}
-
-/// GET /csrf-token — Returns a fresh CSRF token and sets the secure cookie.
-pub async fn get_token_handler(jar: CookieJar) -> (CookieJar, Json<CsrfTokenResponse>) {
+/// GET /api/csrf/token
+/// Handler to provide a fresh, raw CSRF token to the client.
+/// It also sets a secure, HttpOnly cookie containing the *hashed* version of the token.
+pub async fn get_csrf_token(jar: CookieJar) -> (CookieJar, Json<CsrfTokenResponse>) {
     let (jar, raw_token) = csrf::create_csrf_cookie(jar);
     (jar, Json(CsrfTokenResponse { csrf_token: raw_token }))
 }
 
-/// POST /csrf-check — Verifies the submitted token against the hashed cookie.
-pub async fn protected_post_handler(jar: CookieJar, Form(payload): Form<Keys>) -> impl IntoResponse {
-    if csrf::verify_csrf_token(&jar, &payload.authenticity_token) {
-        "✅ Token is valid. You can proceed."
+/// POST /api/csrf/protected-endpoint
+/// An example of a handler that verifies a CSRF token from a JSON payload.
+pub async fn protected_endpoint(
+    jar: CookieJar,
+    // THE FIX: Expect a JSON payload, not a Form, for API consistency.
+    Json(payload): Json<CsrfPayload>,
+) -> Result<impl IntoResponse, AppError> {
+    if csrf::verify_csrf_token(&jar, &payload.csrf_token) {
+        // The token is valid, you can proceed with the real business logic.
+        Ok((StatusCode::OK, "CSRF token is valid. Action processed."))
     } else {
-        "❌ Token is invalid or missing."
+        // The token is invalid or the cookie is missing.
+        // We return a 403 Forbidden error.
+        Err(AppError::InvalidCsrfToken)
     }
 }

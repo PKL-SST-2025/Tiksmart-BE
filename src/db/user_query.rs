@@ -1,23 +1,31 @@
-// File: be-api/src/db/user_query.rs
+// File: src/db/user_query.rs
 
 use crate::errors::AppError;
 use crate::models::User;
-use sqlx::PgPool;
 use chrono::{DateTime, Utc};
-use itertools::Itertools; 
+use sqlx::PgPool;
 
 // A private struct used only for authentication.
-// It includes the password hash, which should never be sent to the client.
 pub struct UserAuthData {
     pub id: i32,
     pub password_hash: String,
 }
 
+/// This is more efficient than fetching the entire User object.
+pub struct UserByResetToken {
+    pub id: i32,
+    pub password_reset_expires_at: Option<DateTime<Utc>>,
+}
+
+
+
+
 /// Fetches a single user from the database by their ID.
-pub async fn get_by_id(pool: &PgPool, id: i32) -> Result<User, AppError> { // <-- Add `pub`
+pub async fn get_by_id(pool: &PgPool, id: i32) -> Result<User, AppError> {
+    // FIXED: Selected all fields to match the User struct.
     let user = sqlx::query_as!(
         User,
-        "SELECT id, email, created_at FROM users WHERE id = $1",
+        "SELECT id, email, password_hash, created_at, password_reset_token, password_reset_expires_at FROM users WHERE id = $1",
         id
     )
     .fetch_one(pool)
@@ -27,10 +35,12 @@ pub async fn get_by_id(pool: &PgPool, id: i32) -> Result<User, AppError> { // <-
 }
 
 /// Creates a new user in the database and returns the created user record.
-pub async fn create(pool: &PgPool, email: String, password_hash: String) -> Result<User, AppError> { // <-- Add `pub`
+pub async fn create(pool: &PgPool, email: String, password_hash: String) -> Result<User, AppError> {
+    // FIXED: Returned all fields to match the User struct.
     let user = sqlx::query_as!(
         User,
-        "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at",
+        "INSERT INTO users (email, password_hash) VALUES ($1, $2) 
+         RETURNING id, email, password_hash, created_at, password_reset_token, password_reset_expires_at",
         email,
         password_hash
     )
@@ -41,7 +51,7 @@ pub async fn create(pool: &PgPool, email: String, password_hash: String) -> Resu
 }
 
 /// Fetches essential authentication data for a user by their email.
-pub async fn get_auth_data_by_email( // <-- Add `pub`
+pub async fn get_auth_data_by_email(
     pool: &PgPool,
     email: &str,
 ) -> Result<UserAuthData, AppError> {
@@ -56,7 +66,6 @@ pub async fn get_auth_data_by_email( // <-- Add `pub`
     Ok(user_auth_data)
 }
 
-
 /// Sets a password reset token and its expiration for a user identified by their email.
 pub async fn set_password_reset_token(
     pool: &PgPool,
@@ -64,7 +73,7 @@ pub async fn set_password_reset_token(
     token: &str,
     expires_at: DateTime<Utc>,
 ) -> Result<(), AppError> {
-    sqlx::query!(
+    let result = sqlx::query!(
         "UPDATE users SET password_reset_token = $1, password_reset_expires_at = $2 WHERE email = $3",
         token,
         expires_at,
@@ -72,33 +81,23 @@ pub async fn set_password_reset_token(
     )
     .execute(pool)
     .await?;
+    
+    // Check if any row was actually updated
+    if result.rows_affected() == 0 {
+        // This will be caught by the error handler and result in a 404 Not Found
+        return Err(AppError::Sqlx(sqlx::Error::RowNotFound));
+    }
 
     Ok(())
 }
 
 
 /// Inserts a batch of new users into the database in a single, efficient query.
-///
-/// This function uses PostgreSQL's `UNNEST` feature to handle bulk data insertion,
-/// which is significantly faster than inserting rows one by one.
-///
-/// # Arguments
-///
-/// * `pool` - The database connection pool.
-/// * `emails` - A vector of email strings for the new users.
-/// * `password_hashes` - A vector of pre-hashed passwords for the new users.
-///
-/// # Returns
-///
-/// * A `Result` containing the number of users successfully created (`usize`).
 pub async fn create_bulk(
     pool: &PgPool,
     emails: Vec<String>,
     password_hashes: Vec<String>,
 ) -> Result<usize, AppError> {
-    // The query takes two arrays as input: one for emails ($1) and one for hashes ($2).
-    // UNNEST turns these arrays into a temporary two-column table.
-    // We then insert all rows from this temporary table into the `users` table.
     let rows_affected = sqlx::query!(
         "INSERT INTO users (email, password_hash) SELECT * FROM UNNEST($1::varchar[], $2::varchar[])",
         &emails,
@@ -110,3 +109,38 @@ pub async fn create_bulk(
 
     Ok(rows_affected as usize)
 }
+
+/// This will return a `RowNotFound` error if the token is invalid, which is handled
+/// by our `AppError` enum to become a 404 Not Found response.
+pub async fn get_user_by_reset_token(
+    pool: &PgPool,
+    token: &str,
+) -> Result<UserByResetToken, AppError> {
+    sqlx::query_as!(
+        UserByResetToken,
+        "SELECT id, password_reset_expires_at FROM users WHERE password_reset_token = $1",
+        token
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::from)
+}
+
+/// It is critical to nullify the token fields to prevent the same token from being reused.
+pub async fn update_password_and_clear_token(
+    pool: &PgPool,
+    user_id: i32,
+    new_hash: &str,
+) -> Result<(), AppError> {
+    sqlx::query!(
+        "UPDATE users
+         SET password_hash = $1, password_reset_token = NULL, password_reset_expires_at = NULL
+         WHERE id = $2",
+        new_hash,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+

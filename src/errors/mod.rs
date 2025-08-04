@@ -7,12 +7,19 @@ use axum::{
 };
 use serde_json::json;
 use thiserror::Error;
+use validator::ValidationErrors;
 
 // Refactor the enum with `thiserror` attributes <--
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("Bad request: {0}")]
     BadRequest(String),
+
+    #[error("Invalid CSRF token")]
+    InvalidCsrfToken,
+    
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
 
     #[error("Invalid credentials")]
     InvalidCredentials,
@@ -22,6 +29,10 @@ pub enum AppError {
 
     #[error("Invalid token")]
     AuthFailInvalidToken,
+
+    #[error("Validation error: {0}")]
+    Validation(#[from] ValidationErrors),
+
 
     #[error("Failed to create token")]
     JwtCreationError,
@@ -46,11 +57,17 @@ impl IntoResponse for AppError {
         let (status, error_message) = match self {
             // 400 - Bad Request
             AppError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+            AppError::Validation(errors) => (StatusCode::BAD_REQUEST, errors.to_string()),
 
             // 401 - Unauthorized
             AppError::InvalidCredentials
             | AppError::AuthFailTokenNotFound
             | AppError::AuthFailInvalidToken => (StatusCode::UNAUTHORIZED, self.to_string()),
+
+            // 403 - Forbidden
+            // Handle both specific CSRF failures and generic permission errors.
+            AppError::InvalidCsrfToken => (StatusCode::FORBIDDEN, self.to_string()),
+            AppError::Forbidden(message) => (StatusCode::FORBIDDEN, message),
 
             // 404 - Not Found (from a specific database error)
             AppError::Sqlx(sqlx::Error::RowNotFound) => {

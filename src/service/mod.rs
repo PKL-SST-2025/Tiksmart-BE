@@ -4,3 +4,8 @@
 
 pub mod auth_service;
 pub mod user_service;
+pub mod project_service;
+pub mod member_service;
+pub mod role_service;
+pub mod subtask_service;
+pub mod task_service;

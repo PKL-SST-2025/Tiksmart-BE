@@ -28,6 +28,7 @@ This starter pack comes with a comprehensive set of features pre-configured:
 *   **Security Hardening:**
     *   **Rate Limiting:** Protects against DoS attacks using [**Tower Governor**](https://github.com/benwis/tower-governor).
     *   **CORS:** Cross-Origin Resource Sharing middleware configured for frontend integration.
+    *   **CSRF:** Cross-site request forgery
     *   **Security Headers:** Essential HTTP security headers (HSTS, X-Frame-Options, etc.) included to protect against common web vulnerabilities.
 *   **Error Handling:** A centralized `AppError` type for consistent error responses.
 *   **Logging:** Structured logging provided by the `tracing` ecosystem.
@@ -54,7 +55,7 @@ Follow these steps to get your local development environment up and running.
 ### 1. Clone the Repository
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/AlmerKastaraZain/Rust-starter-pack/main
 cd <your-project-directory>
 ```
 
@@ -82,18 +83,28 @@ Now, open `.env` and fill in the values for your local setup. The default values
 
 **Example `.env`:**
 ```env
+# .env 
+
 # General Settings
+ENV="development"
+DATABASE_URL="postgres://axum_postgres:axumpostgres@127.0.0.1:5432/axum_postgres"
+DATABASE_URL="postgres://axum_postgres:axumpostgres@127.0.0.1:5432/axum_postgres"
 SERVER_ADDRESS="127.0.0.1:7878"
-DATABASE_URL="postgres://postgres:yourpassword@localhost/yourdbname"
 
 # Security Settings
-FRONTEND_ORIGIN="http://localhost:5173"
-JWT_SECRET="a-very-long-and-secure-random-string-for-jwt"
-JWT_EXPIRATION_HOURS=24
+# CSRF Settings
+CSRF_SECRET="mLirohHZGqUS+Qk1aYTCAIPZ/Q5YpRqOYRLFn9n0RiKhhL5ZcMuaMgyjEMF/s84Pf4Nkh+pfXT+CwrrULp9Olw=="
 
-# Rate Limiting
-RATE_LIMIT_REQUESTS=30
-RATE_LIMIT_PERIOD_SECONDS=60
+# CORS Settings (Set to your localhost or url)
+FRONTEND_ORIGIN="http://localhost:5173"
+
+# JSON Web Token Settings
+JWT_SECRET="gs/wrACujNwM+C5u9up+vYhEUsnruf6OFU+eWk4oT9RrFQdpPTg+KLaYBHeMxbIYPdtDL3CpI/eOJtt3cx3v+A=="
+JWT_EXPIRATION_HOURS=1
+
+# Rate Limiting (DDOS Protections)
+RATE_LIMIT_REQUESTS=2
+RATE_LIMIT_PERIOD_SECONDS=5
 ```
 
 ### 4. Run Database Migrations
@@ -144,6 +155,7 @@ cargo watch -x run
 │   ├── errors/         # Centralized error handling
 │   ├── middleware/     # Custom Axum middleware (e.g., auth)
 │   ├── models/         # Data structures (e.g., User)
+│   ├── utils/          # Utilities 
 │   ├── path/           # Axum router definitions
 │   ├── service/        # Business logic
 │   └── main.rs         # Application entry point
