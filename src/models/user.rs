@@ -3,25 +3,35 @@
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 use crate::utils::validation;
-
+use chrono::{DateTime, Utc};
 // The primary User model, representing a row in the `users` table.
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct User {
     pub id: i32,
     pub email: String,
+    pub username: String, 
     #[serde(skip)]
     pub password_hash: String,
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub created_at: DateTime<Utc>,
+    
     #[serde(skip)]
     pub password_reset_token: Option<String>,
     #[serde(skip)]
-    pub password_reset_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub password_reset_expires_at: Option<DateTime<Utc>>,
+    
 }
 
 // The Data Transfer Object (DTO) for creating a new user.
 // It now derives `Validate` and defines its own validation rules.
 #[derive(Deserialize, Validate)]
 pub struct CreateUserPayload {
+
+        #[validate(
+        length(min = 3, max = 100, message = "Username must be between 3 and 100 characters."),
+        custom(function = "validation::is_safe_text")
+    )]
+    pub username: String,
+
     // The `validate` attribute lets us apply various checks.
     // Here, we check the email format using our custom function.
     #[validate(

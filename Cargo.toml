@@ -9,7 +9,7 @@ sqlx-cli = { version = "0.7", features = ["postgres"] }
 
 [dependencies]
 # Server
-axum = "0.7.5"
+axum = { version = "0.7", features = ["ws"] } 
 
 tokio = { version = "1.0", features = ["full"] }
 tower = "0.5.2"
@@ -35,6 +35,8 @@ validator = { version = "0.16", features = ["derive"] }
 axum_csrf = "0.11.0"
 axum-extra = { version = "0.9.6", features = ["cookie-private"] }
 cookie = "0.18"
+axum-core = "0.4.5"
+
 
 # Configs
 config = "0.14.0" 
@@ -56,3 +58,10 @@ chrono = { version = "0.4.41", features = ["serde"] }
 csrf = "0.5.0"
 lazy_static = "1.4"
 hex = "0.4.3"
+
+# WebSockets
+tokio-tungstenite = "0.21"
+tokio-stream = "0.1" # Useful for websocket streams
+tokio-util = { version = "0.7", features = ["codec"] } # For framed streams
+futures = "0.3" # For async stream operations
+dashmap = "6.1.0"

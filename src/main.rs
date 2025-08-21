@@ -7,7 +7,8 @@ use axum::{
 };
 use axum_csrf::{CsrfConfig, Key};
 use sqlx::PgPool;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
+use tokio::time::{self, Duration};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
@@ -18,7 +19,9 @@ use tower_http::{
 };
 use tracing_subscriber::{fmt, EnvFilter};
 
-use crate::config::CONFIG;
+use dashmap::DashMap;
+use tokio::sync::broadcast;
+use crate::{config::CONFIG};
 
 // Declare all your modules
 mod api;
@@ -26,7 +29,6 @@ mod config;
 mod db;
 mod errors;
 mod models;
-mod path;
 mod utils;
 mod middleware;
 mod service;
@@ -34,12 +36,15 @@ mod service;
 // The central state for our application
 #[derive(Clone)]
 pub struct AppState {
-    db_pool: PgPool,
-    csrf_config: CsrfConfig,
+    pub db_pool: Arc<PgPool>, // Already Arc
+    pub csrf_config: CsrfConfig,
+    // NEW: DashMap to store broadcast senders per project.
+    // project_id -> broadcast::Sender<String> (we'll send JSON strings)
+    pub project_ws_senders: Arc<DashMap<i32, broadcast::Sender<String>>>,
 }
 
 // Implement `FromRef` so extractors can get their dependencies from `AppState`
-impl FromRef<AppState> for PgPool {
+impl FromRef<AppState> for Arc<PgPool> { // Corrected trait implementation
     fn from_ref(state: &AppState) -> Self {
         state.db_pool.clone()
     }
@@ -48,6 +53,13 @@ impl FromRef<AppState> for PgPool {
 impl FromRef<AppState> for CsrfConfig {
     fn from_ref(state: &AppState) -> Self {
         state.csrf_config.clone()
+    }
+}
+
+// NEW: Implement FromRef for the new project_ws_senders
+impl FromRef<AppState> for Arc<DashMap<i32, broadcast::Sender<String>>> {
+    fn from_ref(state: &AppState) -> Self {
+        state.project_ws_senders.clone()
     }
 }
 
@@ -67,16 +79,24 @@ async fn main() {
         .with_secure(CONFIG.env != "development") // Use secure cookies in production
         .with_key(Some(csrf_key));
 
+
     // --- Database Pool ---
-    let db_pool = db::pool::create_pool()
+    let pool = db::pool::create_pool()
         .await
         .expect("Failed to create database pool");
     tracing::info!("Database connected successfully");
 
+    // Wrap the pool in Arc for shared state
+    let shared_db_pool = Arc::new(pool);
+
+    // NEW: Initialize the DashMap for WebSocket senders
+    let project_ws_senders = Arc::new(DashMap::new());
+
     // --- Create the single AppState ---
     let app_state = AppState {
-        db_pool,
+        db_pool: shared_db_pool.clone(),
         csrf_config,
+        project_ws_senders: project_ws_senders.clone(), // Clone for AppState
     };
 
     // --- CORS Layer ---
@@ -127,12 +147,16 @@ async fn main() {
     let serve_dir =
         ServeDir::new("../fe/dist").not_found_service(ServeFile::new("../fe/dist/index.html"));
 
+    let api_service = api::api_router(app_state.clone()) // Pass cloned app_state instance
+        // .layer(governor_layer) // TODO: FIX THIS GOVERNOR_LAYER NO IDEA WHY IT WONT WORK
+        .layer(cors);
+
     let app = Router::new()
-        .merge(path::router()) // Add our API routes
-        .fallback_service(serve_dir) // Serve the frontend
-        .with_state(app_state) // Provide the state to the entire app
-        .layer(cors) // Apply CORS
-        .layer(security_headers_layer); // Apply security headers
+        .nest("/api", api_service)
+        .fallback_service(serve_dir)
+        .layer(security_headers_layer)
+        .with_state(app_state);
+
 
     // --- Run The Server ---
     let listener = TcpListener::bind(&CONFIG.server_address)

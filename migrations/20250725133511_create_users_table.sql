@@ -18,10 +18,15 @@ $$ language 'plpgsql';
 -- Users Table (Assumed Dependency)
 -- A central table for all users in the system.
 CREATE TABLE users (
+
     id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL, -- Storing hashed passwords
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    username VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- These two should NOT have NOT NULL if they can be empty for new users
+    password_reset_token VARCHAR(6), -- No NOT NULL
+    password_reset_expires_at TIMESTAMPTZ -- No NOT NULL
 );
 
 -- #############################################################################

@@ -1,9 +1,8 @@
 // File: src/db/user_query.rs
 
-use crate::errors::AppError;
-use crate::models::User;
+use crate::{errors::AppError, models::user::User};
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{Executor, PgPool, Postgres};
 
 // A private struct used only for authentication.
 pub struct UserAuthData {
@@ -21,34 +20,44 @@ pub struct UserByResetToken {
 
 
 /// Fetches a single user from the database by their ID.
-pub async fn get_by_id(pool: &PgPool, id: i32) -> Result<User, AppError> {
-    // FIXED: Selected all fields to match the User struct.
+pub async fn get_by_id<'e, E>(executor: E, id: i32) -> Result<User, AppError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
     let user = sqlx::query_as!(
         User,
-        "SELECT id, email, password_hash, created_at, password_reset_token, password_reset_expires_at FROM users WHERE id = $1",
+        // The problem is likely in THIS SELECT statement's columns
+        "SELECT id, email, username, password_hash, created_at, password_reset_token, password_reset_expires_at FROM users WHERE id = $1",
         id
     )
-    .fetch_one(pool)
-    .await?;
-
+    .fetch_one(executor)
+    .await?; // If fetch_one finds no row, it returns RowNotFound
     Ok(user)
 }
+
 
 /// Creates a new user in the database and returns the created user record.
-pub async fn create(pool: &PgPool, email: String, password_hash: String) -> Result<User, AppError> {
-    // FIXED: Returned all fields to match the User struct.
+// This function should already be generic over Executor if it's called within a transaction elsewhere.
+// If not, it can remain `&PgPool`. But it's good practice for atomic operations.
+// For now, let's assume it *might* be called in transaction, so make it generic.
+pub async fn create<'e, E>(executor: E, email: String, username: String, password_hash: String) -> Result<User, AppError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
     let user = sqlx::query_as!(
         User,
-        "INSERT INTO users (email, password_hash) VALUES ($1, $2) 
-         RETURNING id, email, password_hash, created_at, password_reset_token, password_reset_expires_at",
+        "INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3)
+         RETURNING id, email, username, password_hash, created_at, password_reset_token, password_reset_expires_at",
         email,
+        username,
         password_hash
     )
-    .fetch_one(pool)
+    .fetch_one(executor) // Use the generic executor
     .await?;
 
     Ok(user)
 }
+
 
 /// Fetches essential authentication data for a user by their email.
 pub async fn get_auth_data_by_email(
