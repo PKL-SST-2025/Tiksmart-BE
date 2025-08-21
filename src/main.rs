@@ -131,7 +131,6 @@ async fn main() {
         .merge(path::router()) // Add our API routes
         .fallback_service(serve_dir) // Serve the frontend
         .with_state(app_state) // Provide the state to the entire app
-        .layer(governor_layer) // Apply rate limiting
         .layer(cors) // Apply CORS
         .layer(security_headers_layer); // Apply security headers
 
