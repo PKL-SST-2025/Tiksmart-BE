@@ -2,8 +2,8 @@
 
 use crate::db::user_query;
 use crate::errors::AppError;
-use crate::models::user::ResetPasswordPayload;
-use crate::models::{CreateUserPayload, User};
+use crate::models::user::{CreateUserPayload, ResetPasswordPayload, User};
+use crate::service::auth_service;
 use crate::utils::validation; // Import the validation module
 use itertools::Itertools;
 use sqlx::PgPool;
@@ -16,19 +16,13 @@ pub async fn get_by_id(pool: &PgPool, id: i32) -> Result<User, AppError> {
 /// The service function for creating a user.
 /// It now uses the centralized validation logic.
 pub async fn create(pool: &PgPool, payload: CreateUserPayload) -> Result<User, AppError> {
-    // --- Validation Logic ---
-    // A single, clean call to validate the entire payload based on the
-    // rules we defined in the `CreateUserPayload` struct.
-    validation::validate_payload(&payload)?;
+    validation::validate_payload(&payload)?; // Validation happens here
 
-    // --- Core Logic ---
-    let hashed_password =
-        bcrypt::hash(&payload.password, bcrypt::DEFAULT_COST).map_err(AppError::from)?;
+    // Hash the password
+    let password_hash = auth_service::hash_password(&payload.password).await?;
 
-    // --- Database Interaction ---
-    let user = user_query::create(pool, payload.email, hashed_password).await?;
-
-    Ok(user)
+    // FIX: Pass payload.username to the query
+    user_query::create(pool, payload.email, payload.username, password_hash).await
 }
 
 

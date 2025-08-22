@@ -4,8 +4,15 @@
 
 pub mod auth_service;
 pub mod user_service;
-pub mod project_service;
-pub mod member_service;
-pub mod role_service;
-pub mod subtask_service;
-pub mod task_service;
+
+
+pub mod attraction_service;
+pub mod category_service;
+pub mod event_service;
+pub mod order_service;
+pub mod payment_service;
+pub mod pricing_service;
+pub mod seating_service;
+pub mod ticket_service;
+pub mod venue_service;
+pub mod organizer_service;

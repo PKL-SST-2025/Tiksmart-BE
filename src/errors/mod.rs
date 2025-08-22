@@ -1,17 +1,22 @@
 // File: be-api/src/errors/mod.rs
 
 use axum::{
-    http::StatusCode,
+    http::{header::InvalidHeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use serde_json::json;
+use stripe::StripeError;
 use thiserror::Error;
 use validator::ValidationErrors;
 
 // Refactor the enum with `thiserror` attributes <--
 #[derive(Debug, Error)]
 pub enum AppError {
+
+    #[error("Internal server error: {0}")]
+    InternalServerError(String),
+
     #[error("Bad request: {0}")]
     BadRequest(String),
 
@@ -34,6 +39,9 @@ pub enum AppError {
     Validation(#[from] ValidationErrors),
 
 
+    #[error("Invalid header value")]
+    InvalidHeaderValue(#[from] InvalidHeaderValue),
+
     #[error("Failed to create token")]
     JwtCreationError,
 
@@ -44,6 +52,9 @@ pub enum AppError {
     // This will automatically implement `From<bcrypt::BcryptError> for AppError`
     #[error("Hashing error")]
     Bcrypt(#[from] bcrypt::BcryptError),
+
+    #[error("Stripe error")]
+    Stripe(#[from] StripeError),
 }
 
 // This is the magic: we implement `IntoResponse` for our `AppError`.
@@ -55,9 +66,16 @@ impl IntoResponse for AppError {
 
 
         let (status, error_message) = match self {
+
+            AppError::Stripe(e) => {
+                tracing::error!("Stripe error occurred: {:?}", e);
+                (StatusCode::BAD_REQUEST, "Payment processing error".to_string())
+            }
+
             // 400 - Bad Request
             AppError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             AppError::Validation(errors) => (StatusCode::BAD_REQUEST, errors.to_string()),
+            AppError::InvalidHeaderValue(_) => (StatusCode::BAD_REQUEST, self.to_string()),
 
             // 401 - Unauthorized
             AppError::InvalidCredentials
@@ -78,6 +96,10 @@ impl IntoResponse for AppError {
             AppError::JwtCreationError | AppError::Sqlx(_) | AppError::Bcrypt(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred".to_string())
             }
+            AppError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+
+
+
         };
         
         // Create a JSON response body.

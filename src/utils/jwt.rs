@@ -1,24 +1,25 @@
-// File: be-api/src/utils/jwt.rs
+// File: src/utils/jwt.rs
 
-use crate::config::CONFIG; 
+use crate::config::CONFIG;
 use crate::errors::AppError;
 use crate::models::TokenClaims;
 use jsonwebtoken::{encode, EncodingKey, Header};
 
-/// Creates a JSON Web Token (JWT) for a given user ID.
-pub fn create_jwt(user_id: i32) -> Result<String, AppError> {
-    // We get the expiration from the config now, not hardcoded.
+/// Creates a JSON Web Token (JWT) for a given principal ID and role.
+// We've added the `role` parameter here.
+pub fn create_jwt(principal_id: i32, role: &str) -> Result<String, AppError> {
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::hours(CONFIG.jwt_expiration_hours))
         .expect("Failed to create expiration time")
         .timestamp();
 
+    // Now we correctly provide the `role` field when creating the claims.
     let claims = TokenClaims {
-        sub: user_id,
+        sub: principal_id.to_string(), // Convert the ID to a string for the 'sub' claim
+        role: role.to_string(),        // Add the role
         exp: expiration as usize,
     };
 
-    // Use the secret from the config.
     encode(
         &Header::default(),
         &claims,

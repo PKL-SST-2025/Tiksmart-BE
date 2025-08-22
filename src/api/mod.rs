@@ -1,81 +1,111 @@
-// src/api/mod.rs
-
-use crate::{middleware::{auth_guard::auth_guard, csrf_guard::csrf_guard}, AppState}; // <-- IMPORTANT: Make sure AppState is imported
+use crate::{
+    middleware::{
+        admin_guard::admin_guard, auth_guard::auth_guard, csrf_guard::csrf_guard,
+    },
+    AppState,
+};
 use axum::{
     middleware,
-    routing::{get, post},
+    routing::{delete, get, patch, post},
     Router,
 };
-// We don't need to import PgPool here anymore, as it's part of AppState
-// use sqlx::PgPool; 
 
-// Declare your handler modules
+// Declare all the handler modules we've created.
+pub mod attraction_handler;
 pub mod auth_handler;
+pub mod category_handler;
 pub mod csrf_handler;
-pub mod member_handler;
-pub mod project_handler;
-pub mod role_handler;
-pub mod subtask_handler;
-pub mod task_handler;
-pub mod user_handler; 
+pub mod event_handler;
+pub mod order_handler;
+pub mod payment_handler;
+pub mod pricing_handler;
+pub mod seating_handler;
+pub mod ticket_handler;
+pub mod user_handler;
+pub mod venue_handler;
+pub mod organizer_handler; // <-- ADD the new handler module
 
-/// Assembles a router for all API-specific endpoints.
-// Change the return type from Router<PgPool> to Router<AppState>
+/// Assembles the master router for all API endpoints.
 pub fn api_router() -> Router<AppState> {
-    // --- Public Routes ---
-    // These routes are accessible without any authentication.
-    let public_router = Router::new()
-        // Auth routes for logging in and password management.
+    // --- Public Routes (No Auth required) ---
+    let public_routes = Router::new()
+        // Events
+        .route("/events", get(event_handler::list_published_events))
+        .route("/events/:id", get(event_handler::get_event_by_id))
+        .route("/events/:event_id/offers", get(pricing_handler::list_public_offers_for_event))
+        .route("/events/:event_id/seat-map", get(seating_handler::get_seat_map_for_event))
+        // Venues
+        .route("/venues", get(venue_handler::list_venues))
+        .route("/venues/:id", get(venue_handler::get_venue_by_id))
+        // Categories
+        .route("/segments", get(category_handler::list_segments))
+        .route("/segments/:id/genres", get(category_handler::list_genres_by_segment))
+        .route("/genres/:id/sub-genres", get(category_handler::list_sub_genres_by_genre));
+
+    // --- Authentication Routes (Public but state-changing, need CSRF) ---
+    let auth_routes = Router::new()
+        .route("/auth/register", post(auth_handler::register))
         .route("/auth/login", post(auth_handler::login))
-        .route("/auth/forgot-password", post(auth_handler::forgot_password))
-        .route("/users/reset-password", post(user_handler::reset_password_handler))
-        // User creation routes.
-        .route("/users", post(user_handler::create_user))
-        .layer(middleware::from_fn(csrf_guard));
+        .route("/auth/logout", post(auth_handler::logout))
+        // .route("/auth/forgot-password", post(auth_handler::forgot_password)) // NO idea why this causes error T-T
+        .route("/users/reset-password-otp", post(user_handler::reset_password_with_otp_handler));
+        // Removed reset_password_handler as it's replaced by the OTP version
 
-    let public_router_no_csrf = Router::new()
-        // CSRF token provider.
-        .route("/csrf/token", get(csrf_handler::get_csrf_token));
-
-    // --- Protected Routes ---
-    // All routes defined here will require a valid JWT, as enforced by the `auth_guard`.
-    let protected_router = Router::new()
-        // --- Authenticated User & Auth Routes ---
+    // --- Protected Routes (Auth required) ---
+    let protected_routes = Router::new()
+        // User Profile & Tickets
         .route("/auth/me", get(auth_handler::get_me))
-        .route("/users/:id", get(user_handler::get_user_by_id))
-
-        // --- Project Routes ---
-        .route("/projects", get(project_handler::get_my_projects).post(project_handler::create_project))
-        .route("/projects/:project_id", get(project_handler::get_project_by_id))
+        .route("/me/tickets", get(ticket_handler::get_my_tickets))
         
-        // --- Member Routes (Nested under Projects) ---
-        .route("/projects/:project_id/members", get(member_handler::get_project_members).post(member_handler::add_member_to_project))
-
-        // --- Role Routes (Nested under Projects) ---
-        .route("/projects/:project_id/roles", get(role_handler::get_roles_for_project).post(role_handler::create_role_for_project))
-
-        // --- Task Routes ---
-        // Listing/Creation is nested under a project for context.
-        .route("/projects/:project_id/tasks", get(task_handler::get_tasks_for_project).post(task_handler::create_task))
-        // Actions on a specific task use the task's ID directly.
-        .route("/tasks/:task_id/contributors", post(task_handler::assign_contributor_handler))
-        .route("/tasks/:task_id/required-roles", post(task_handler::add_required_role_handler))
+        // Orders (Customer action)
+        .route("/orders", post(order_handler::create_order))
         
-        // --- Subtask Routes (Nested under Tasks) ---
-        .route("/tasks/:task_id/subtasks", get(subtask_handler::get_subtasks_for_task).post(subtask_handler::create_subtask))
+        // Event Management (Organizer role)
+        .route("/events", post(event_handler::create_event))
+        .route("/events/:id", patch(event_handler::update_event))
+        .route("/events/:id", delete(event_handler::delete_event))
+        
+        // Nested Event Resources (Organizer role)
+        .route("/events/:event_id/attractions", post(attraction_handler::add_attraction_to_event))
+        .route("/events/:event_id/attractions/:attraction_id", delete(attraction_handler::remove_attraction_from_event))
+        .route("/events/:event_id/tiers", post(pricing_handler::create_ticket_tier))
+        .route("/tiers/:tier_id/offers", post(pricing_handler::create_offer))
 
-        // --- Middleware Layer ---
-        // This is the correct and modern way to apply middleware to a group of routes.
-        // The `auth_guard` will run for every single request handled by `protected_router`.
-        .layer(middleware::from_fn(auth_guard))
-        .layer(middleware::from_fn(csrf_guard));
+        // --- ADDED: Organizer-specific routes ---
+        .route("/organizer/stripe/onboarding-link", post(organizer_handler::get_onboarding_link));
 
-    // --- Final Router ---
-    // Merge the public and protected routers into one.
-    // The final router will first try to match a route in `public_router`.
-    // If it fails, it will then try to match a route in `protected_router`.
+
+    // --- Admin-Only Routes (Auth and Admin Role required) ---
+    let admin_routes = Router::new()
+        .route("/venues", post(venue_handler::create_venue))
+        .route("/segments", post(category_handler::create_segment))
+        .route("/segments/:id/genres", post(category_handler::create_genre))
+        .route("/genres/:id/sub-genres", post(category_handler::create_sub_genre))
+        // You would also need an admin login endpoint, e.g., /admin/login in auth_routes
+        .layer(middleware::from_fn(admin_guard));
+
+    // --- Webhook Routes (No Auth, No CSRF - special case) ---
+    let webhook_routes = Router::<AppState>::new()
+        .route("/webhooks/stripe", post(payment_handler::stripe_webhook_handler));
+
+    // --- Assemble the Final Router ---
     Router::new()
-        .merge(public_router_no_csrf) 
-        .merge(public_router)
-        .merge(protected_router)
+        // Public GET routes that are safe from CSRF
+        .merge(public_routes)
+        .route("/csrf/token", get(csrf_handler::get_csrf_token))
+        
+        // Public POST routes that require CSRF protection
+        .merge(auth_routes.layer(middleware::from_fn(csrf_guard)))
+
+        // All protected and admin routes need CSRF and then Auth.
+        .merge(
+            Router::new()
+                .merge(protected_routes)
+                .merge(admin_routes)
+                .layer(middleware::from_fn(csrf_guard))
+                .layer(middleware::from_fn(auth_guard)),
+        )
+        
+        // Webhooks are a special case and live at the top level
+        .merge(webhook_routes)
 }

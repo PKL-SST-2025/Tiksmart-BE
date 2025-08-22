@@ -4,6 +4,7 @@ use std::borrow::Cow;
 
 use lazy_static::lazy_static;
 use regex::Regex;
+use rust_decimal::Decimal;
 use validator::{Validate, ValidationError};
 
 // --- Pre-compiled Regular Expressions for Performance ---
@@ -154,4 +155,16 @@ pub fn validate_payload<T: Validate>(payload: &T) -> Result<(), crate::errors::A
     payload
         .validate()
         .map_err(|e| crate::errors::AppError::BadRequest(e.to_string()))
+}
+
+
+/// Custom validation function to check if a Decimal is non-negative.
+pub fn is_non_negative_decimal(price: &Decimal) -> Result<(), ValidationError> {
+    if price.is_sign_negative() {
+        let mut err = ValidationError::new("negative_price");
+        err.message = Some(Cow::from("Price cannot be negative."));
+        Err(err)
+    } else {
+        Ok(())
+    }
 }

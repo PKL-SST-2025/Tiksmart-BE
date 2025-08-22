@@ -16,6 +16,9 @@ pub struct Config {
     pub rate_limit_period_seconds: u64, 
     pub csrf_secret: String,
     pub env: String,
+
+    pub stripe_secret_key: String,
+    pub stripe_webhook_secret: String,
 }
 
 // 2. A function to load the configuration from the environment.
