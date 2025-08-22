@@ -22,6 +22,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 use dashmap::DashMap;
 use tokio::sync::broadcast;
 use crate::{config::CONFIG};
+use stripe::Client as StripeClient; 
 
 // Declare all your modules
 mod api;
@@ -32,6 +33,7 @@ mod models;
 mod utils;
 mod middleware;
 mod service;
+mod clients;
 
 // The central state for our application
 #[derive(Clone)]
@@ -41,6 +43,14 @@ pub struct AppState {
     // NEW: DashMap to store broadcast senders per project.
     // project_id -> broadcast::Sender<String> (we'll send JSON strings)
     pub project_ws_senders: Arc<DashMap<i32, broadcast::Sender<String>>>,
+        pub stripe_client: Arc<StripeClient>,
+}
+
+// Implement `FromRef` for the new Stripe client
+impl FromRef<AppState> for Arc<StripeClient> {
+    fn from_ref(state: &AppState) -> Self {
+        state.stripe_client.clone()
+    }
 }
 
 // Implement `FromRef` so extractors can get their dependencies from `AppState`
@@ -89,14 +99,19 @@ async fn main() {
     // Wrap the pool in Arc for shared state
     let shared_db_pool = Arc::new(pool);
 
-    // NEW: Initialize the DashMap for WebSocket senders
+    // Initialize the DashMap for WebSocket senders
     let project_ws_senders = Arc::new(DashMap::new());
+
+    // --- Stripe Client Initialization ---
+    let stripe_client = clients::stripe_client::create_stripe_client();
+    let shared_stripe_client = Arc::new(stripe_client); // Correctly wrapped in Arc
 
     // --- Create the single AppState ---
     let app_state = AppState {
-        db_pool: shared_db_pool.clone(),
+        db_pool: shared_db_pool,
         csrf_config,
-        project_ws_senders: project_ws_senders.clone(), // Clone for AppState
+        project_ws_senders: project_ws_senders,
+        stripe_client: shared_stripe_client, 
     };
 
     // --- CORS Layer ---
@@ -147,7 +162,7 @@ async fn main() {
     let serve_dir =
         ServeDir::new("../fe/dist").not_found_service(ServeFile::new("../fe/dist/index.html"));
 
-    let api_service = api::api_router(app_state.clone()) // Pass cloned app_state instance
+    let api_service = api::api_router() // Pass cloned app_state instance
         // .layer(governor_layer) // TODO: FIX THIS GOVERNOR_LAYER NO IDEA WHY IT WONT WORK
         .layer(cors);
 

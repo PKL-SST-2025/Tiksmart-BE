@@ -21,6 +21,21 @@ pub struct User {
     
 }
 
+// Represents the organizer-specific data linked to a user.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct OrganizerProfile {
+    pub user_id: i32,
+    pub company_name: Option<String>,
+    pub contact_phone: Option<String>,
+    pub website_url: Option<String>,
+    
+    // Add the new field to the model.
+    pub stripe_account_id: Option<String>,
+    
+    pub created_at: DateTime<Utc>,
+    pub last_updated: DateTime<Utc>,
+}
+
 // The Data Transfer Object (DTO) for creating a new user.
 // It now derives `Validate` and defines its own validation rules.
 #[derive(Deserialize, Validate)]

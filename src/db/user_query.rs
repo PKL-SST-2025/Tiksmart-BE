@@ -4,6 +4,7 @@ use crate::{errors::AppError, models::user::User};
 use chrono::{DateTime, Utc};
 use sqlx::{Executor, PgPool, Postgres};
 
+
 // A private struct used only for authentication.
 pub struct UserAuthData {
     pub id: i32,
@@ -75,31 +76,6 @@ pub async fn get_auth_data_by_email(
     Ok(user_auth_data)
 }
 
-/// Sets a password reset token and its expiration for a user identified by their email.
-pub async fn set_password_reset_token(
-    pool: &PgPool,
-    email: &str,
-    token: &str,
-    expires_at: DateTime<Utc>,
-) -> Result<(), AppError> {
-    let result = sqlx::query!(
-        "UPDATE users SET password_reset_token = $1, password_reset_expires_at = $2 WHERE email = $3",
-        token,
-        expires_at,
-        email
-    )
-    .execute(pool)
-    .await?;
-    
-    // Check if any row was actually updated
-    if result.rows_affected() == 0 {
-        // This will be caught by the error handler and result in a 404 Not Found
-        return Err(AppError::Sqlx(sqlx::Error::RowNotFound));
-    }
-
-    Ok(())
-}
-
 
 /// Inserts a batch of new users into the database in a single, efficient query.
 pub async fn create_bulk(
@@ -153,3 +129,74 @@ pub async fn update_password_and_clear_token(
     Ok(())
 }
 
+
+
+
+/// Sets a password reset OTP code and its expiration for a user identified by their email.
+pub async fn set_password_reset_token(
+    pool: &PgPool,
+    email: &str,
+    token: &str, // The 6-digit code
+    expires_at: DateTime<Utc>,
+) -> Result<(), AppError> {
+    let result = sqlx::query!(
+        "UPDATE users SET password_reset_token = $1, password_reset_expires_at = $2 WHERE email = $3",
+        token,
+        expires_at,
+        email
+    )
+    .execute(pool)
+    .await?;
+
+    // Check if any row was actually updated.
+    // This is a security measure to prevent leaking whether an email exists in the system.
+    // The request will succeed from the user's perspective, but no email will be sent.
+    if result.rows_affected() == 0 {
+        tracing::warn!("Password reset requested for non-existent email: {}", email);
+        // We return RowNotFound, which our error handler will treat as a 404, but
+        // the service layer will handle this gracefully.
+        return Err(AppError::Sqlx(sqlx::Error::RowNotFound));
+    }
+
+    Ok(())
+}
+
+/// A lightweight struct to fetch only the data needed for OTP verification.
+pub struct UserForOtpVerification {
+    pub id: i32,
+    pub password_reset_token: Option<String>,
+    pub password_reset_expires_at: Option<DateTime<Utc>>,
+}
+
+/// Fetches a user's ID and reset token info by their email.
+pub async fn get_user_for_otp_verification(
+    pool: &PgPool,
+    email: &str,
+) -> Result<UserForOtpVerification, AppError> {
+    sqlx::query_as!(
+        UserForOtpVerification,
+        "SELECT id, password_reset_token, password_reset_expires_at FROM users WHERE email = $1",
+        email
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(AppError::from)
+}
+
+/// Updates a user's password hash and, crucially, clears the OTP fields to prevent reuse.
+pub async fn update_password_and_clear_otp(
+    pool: &PgPool,
+    user_id: i32,
+    new_hash: &str,
+) -> Result<(), AppError> {
+    sqlx::query!(
+        "UPDATE users
+         SET password_hash = $1, password_reset_token = NULL, password_reset_expires_at = NULL
+         WHERE id = $2",
+        new_hash,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
