@@ -1,6 +1,6 @@
+use crate::config::CONFIG;
 use crate::errors::AppError;
-use crate::models::TokenClaims;
-use crate::config::CONFIG; 
+use crate::models::TokenClaims; // Assumes TokenClaims now has a `role: String` field
 use axum::{
     extract::Request,
     http::{header, HeaderValue},
@@ -10,32 +10,43 @@ use axum::{
 use axum_extra::extract::CookieJar;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 
-
 pub async fn auth_guard(mut req: Request, next: Next) -> Result<Response, AppError> {
-    // FIX: Get the token from either the header OR the cookie
+    // This part remains the same: get the token from header or cookie.
     let token = get_token_from_header(req.headers().get(header::AUTHORIZATION))
         .or_else(|_| {
-            // If header fails, try to get it from the cookie.
-            // This is how we authenticate the WebSocket handshake.
             let headers = req.headers().clone();
             let jar = CookieJar::from_headers(&headers);
             get_token_from_cookie(&jar)
         })?;
 
-    // Use the secret from the config.
+    // This part also remains the same: decode the token.
     let claims = decode::<TokenClaims>(
         &token,
         &DecodingKey::from_secret(CONFIG.jwt_secret.as_ref()),
         &Validation::default(),
     )
     .map_err(|e| {
-        tracing::warn!("Auth guard: Invalid token provided: {}", e); // Log the JWT error
+        tracing::warn!("Auth guard: Invalid token provided: {}", e);
         AppError::AuthFailInvalidToken
     })?
     .claims;
 
-    // Add the user ID from the claims to the request extensions.
-    req.extensions_mut().insert(claims.sub);
+    // The previous version only inserted the subject (ID). Now we insert both
+    // the ID and the role into the request extensions for downstream use.
+
+    // 1. Parse the subject (sub) claim into an i32 for type safety.
+    let principal_id: i32 = claims.sub.parse().map_err(|_| {
+        tracing::error!("Auth guard: 'sub' claim is not a valid integer in token.");
+        AppError::AuthFailInvalidToken
+    })?;
+
+    // 2. Insert the parsed ID into the request extensions.
+    // Handlers will extract this with `Extension(user_id): Extension<i32>`.
+    req.extensions_mut().insert(principal_id);
+
+    // 3. Insert the role string into the request extensions.
+    // The `admin_guard` middleware will extract this.
+    req.extensions_mut().insert(claims.role);
 
     // If all is well, pass the request to the next layer.
     Ok(next.run(req).await)
@@ -54,7 +65,7 @@ fn get_token_from_header(header: Option<&HeaderValue>) -> Result<String, AppErro
     }
 }
 
-// NEW: Helper function to extract token from the auth cookie
+/// Helper function to extract token from the auth cookie
 fn get_token_from_cookie(jar: &CookieJar) -> Result<String, AppError> {
     jar.get("auth-token")
         .map(|cookie| cookie.value().to_string())

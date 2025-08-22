@@ -6,6 +6,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use stripe::StripeError;
 use thiserror::Error;
 use validator::ValidationErrors;
 
@@ -38,6 +39,9 @@ pub enum AppError {
     Validation(#[from] ValidationErrors),
 
 
+    #[error("Invalid header value")]
+    InvalidHeaderValue(#[from] InvalidHeaderValue),
+
     #[error("Failed to create token")]
     JwtCreationError,
 
@@ -49,9 +53,8 @@ pub enum AppError {
     #[error("Hashing error")]
     Bcrypt(#[from] bcrypt::BcryptError),
 
-    // This will automatically implement `From<InvalidHeaderValue> for AppError`
-    #[error("Invalid header value")]
-    InvalidHeaderValue(#[from] InvalidHeaderValue),
+    #[error("Stripe error")]
+    Stripe(#[from] StripeError),
 }
 
 // This is the magic: we implement `IntoResponse` for our `AppError`.
@@ -63,6 +66,12 @@ impl IntoResponse for AppError {
 
 
         let (status, error_message) = match self {
+
+            AppError::Stripe(e) => {
+                tracing::error!("Stripe error occurred: {:?}", e);
+                (StatusCode::BAD_REQUEST, "Payment processing error".to_string())
+            }
+
             // 400 - Bad Request
             AppError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             AppError::Validation(errors) => (StatusCode::BAD_REQUEST, errors.to_string()),
@@ -88,6 +97,8 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred".to_string())
             }
             AppError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+
+
 
         };
         

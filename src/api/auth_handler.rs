@@ -1,4 +1,5 @@
 use crate::errors::AppError;
+use crate::models::auth::{ForgotPasswordPayload, ForgotPasswordResponse};
 use crate::models::{LoginPayload, LoginResponse}; // Keep LoginResponse for token, but service won't use it directly now.
 use crate::models::user::{CreateUserPayload, User};
 use crate::service::{auth_service, user_service};
@@ -59,16 +60,22 @@ pub async fn get_auth_token(jar: CookieJar) -> (CookieJar, String) {
     (jar, token)
 }
 
-// ForgotPassword handler can also be simplified if the service handles the response
-// For now, let's assume it still returns StatusCode.
+/// Handler for a user to request a password reset code.
+/// It returns the code in the response body for a frontend service ("mail js") to use.
+#[tracing::instrument(skip(app_state, payload))]
 pub async fn forgot_password(
     State(app_state): State<AppState>,
-    Json(payload): Json<serde_json::Value>,
-) -> Result<axum::http::StatusCode, AppError> {
-    let email = payload["email"].as_str().ok_or(AppError::BadRequest(
-        "Missing 'email' field".to_string(),
-    ))?;
-    // This auth_service function needs to exist or be created
-    // auth_service::send_password_reset_email(&app_state.db_pool, email).await?;
-    Ok(axum::http::StatusCode::OK)
+    Json(payload): Json<ForgotPasswordPayload>,
+) -> Result<Json<ForgotPasswordResponse>, AppError> {
+    // Call the service which handles validation, code generation, and DB update.
+    let reset_code =
+        auth_service::request_password_reset(&app_state.db_pool, payload).await?;
+
+    let response = ForgotPasswordResponse {
+        message: "If an account with this email exists, a password reset code has been generated.".to_string(),
+        reset_code, // Return the code
+    };
+
+    Ok(Json(response))
 }
+

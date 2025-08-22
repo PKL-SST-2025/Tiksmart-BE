@@ -1,6 +1,7 @@
 use crate::errors::AppError;
+use crate::models::auth::ResetPasswordWithOtpPayload;
 use crate::models::user::{BulkCreateResponse, CreateUserPayload, ResetPasswordPayload, User};
-use crate::service::user_service;
+use crate::service::{auth_service, user_service};
 use crate::AppState; // Correctly imports AppState
 use axum::http::StatusCode;
 use axum::{
@@ -44,5 +45,15 @@ pub async fn reset_password_handler(
     Json(payload): Json<ResetPasswordPayload>,
 ) -> Result<StatusCode, AppError> {
     user_service::reset_password(&app_state.db_pool, payload).await?;
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Handler to reset a user's password using an OTP.
+#[tracing::instrument(skip(app_state, payload))]
+pub async fn reset_password_with_otp_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<ResetPasswordWithOtpPayload>,
+) -> Result<StatusCode, AppError> {
+    auth_service::reset_password_with_otp(&app_state.db_pool, payload).await?;
+    Ok(StatusCode::NO_CONTENT) 
 }
